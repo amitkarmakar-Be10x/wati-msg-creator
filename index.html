@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>WATI Message Filler</title>
+<style>
+*{box-sizing:border-box}html,body{margin:0;height:100%}
+body{font-family:"Segoe UI",system-ui,sans-serif;background:#2a0a0a;color:#fff7e6;overflow-x:hidden}
+canvas{position:fixed;inset:0;width:100%;height:100%;z-index:0}
+main{position:relative;z-index:1;max-width:760px;margin:0 auto;padding:28px 16px 60px}
+.bar{height:6px;border-radius:6px;background:linear-gradient(90deg,#FF9933 33%,#fff 33% 66%,#138808 66%);margin-bottom:18px}
+h1{margin:0 0 4px;font-size:1.8rem;color:#ffb347;text-shadow:0 2px 8px #0008}
+p.sub{margin:0 0 20px;color:#ffe0b0}
+.card{background:#3b0d0dd9;border:2px solid #ffb347;border-radius:16px;padding:18px;margin-bottom:16px;backdrop-filter:blur(4px);box-shadow:0 6px 24px #0007}
+.drop{border:2px dashed #ffb347;border-radius:14px;padding:30px;text-align:center;cursor:pointer;transition:.2s}
+.drop.on,.drop:hover{background:#ff993322;transform:scale(1.01)}
+label{display:block;margin:0 0 6px;font-weight:600;color:#ffcf7a}
+input[type=text]{width:100%;padding:11px 12px;border-radius:10px;border:2px solid #ffb347;background:#1d0505;color:#fff;font-size:1rem}
+button{width:100%;margin-top:14px;padding:13px;font-size:1.05rem;font-weight:700;border:0;border-radius:12px;cursor:pointer;color:#2a0a0a;background:linear-gradient(90deg,#FF9933,#ffd24d,#138808);}
+button:disabled{opacity:.4;cursor:not-allowed}
+#info,#stats{font-size:.95rem;line-height:1.6}
+.pill{display:inline-block;margin:3px 4px 3px 0;padding:3px 10px;border-radius:20px;background:#ff993333;border:1px solid #ffb347}
+.warn{color:#ff8a8a}.ok{color:#8dffa0}
+table{width:100%;border-collapse:collapse;font-size:.8rem}td,th{border:1px solid #ffb34766;padding:4px 6px;text-align:left;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.scroll{overflow-x:auto}
+</style></head><body>
+<canvas id="c"></canvas>
+<main>
+<div class="bar"></div>
+<h1>🪔 WATI Message Filler</h1>
+<p class="sub">Upload the “without msg” CSV → get the same file with msg1–msg4 filled from the <b>Leads</b> column.</p>
+
+<div class="card">
+ <div class="drop" id="drop">📂 Drop <b>wati_file_without_msg.csv</b> here or click to choose
+ <input type="file" id="file" accept=".csv" hidden></div>
+ <div id="info"></div>
+</div>
+
+<div class="card">
+ <label for="out">Output file name</label>
+ <input type="text" id="out" placeholder="e.g. wati_oct_batch_final">
+ <button id="go" disabled>⬇ Generate &amp; Download CSV</button>
+</div>
+
+<div class="card" id="statsCard" style="display:none"><div id="stats"></div><div class="scroll" id="prev"></div></div>
+</main>
+
+<script>
+const MSG={"Unemployed and Freelancer": ["What we will cover-", "Using AI to turn learning into skills, skills into opportunities, and opportunities into income.", "Transforming what you already know into new earning possibilities with AI & much more", "It is a practical Hands-on Session."], "Generic": ["What we will cover-", "Turning your existing skill-set into AI-powered side-income opportunities.", "Creating new income streams by combining your professional expertise with the help of AI.", "It is a practical Hands-on Session."], "Student": ["What we will cover-", "Discovering how AI can help you build skills and unlock side-income opportunities.", "Using AI to build a skillset that goes beyond your academics, will help you even after you finish your school/college & much more.", "It is a practical Hands-on Session."], "Educator": ["What we will cover-", "Going beyond the classroom with AI-powered skills and new income possibilities", "Turning your teaching expertise into additional income opportunities with AI skills & much more", "It is a practical Hands-on Session."], "Business": ["What we will cover-", "Implementing AI to streamline operations, strengthen sales & marketing, and unlock new revenue opportunities", "Developing AI skills to scale your business, increase efficiency & much more", "It is a practical Hands-on Session."], "Finance": ["What we will cover-", "Creating new income streams by combining your finance expertise with AI.", "Developing AI skills to unlock new career opportunities, earning potential & much more", "It is a practical Hands-on Session."], "Tech": ["What we will cover-", "Turning your tech skills into AI-powered side-income opportunities.", "Building and monetizing AI-based solutions, services, and digital projects & Much More.", "It is a practical Hands-on Session."]};
+const KEYS=Object.keys(MSG), norm=s=>(s||"").trim().toLowerCase(), LK={};
+KEYS.forEach(k=>LK[norm(k)]=k);
+let rows=[],head=[],loaded=null;
+
+function parseCSV(t){
+  if(t.charCodeAt(0)===0xFEFF)t=t.slice(1);
+  const out=[];let r=[],f="",q=false;
+  for(let i=0;i<t.length;i++){const ch=t[i];
+    if(q){if(ch=='"'){if(t[i+1]=='"'){f+='"';i++}else q=false}else f+=ch}
+    else if(ch=='"')q=true;
+    else if(ch==','){r.push(f);f=""}
+    else if(ch=='\n'){r.push(f);out.push(r);r=[];f=""}
+    else if(ch!='\r')f+=ch;}
+  if(f!==""||r.length){r.push(f);out.push(r)}
+  return out;}
+const esc=v=>/[",\n\r]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;
+
+const drop=document.getElementById("drop"),fi=document.getElementById("file"),
+ info=document.getElementById("info"),go=document.getElementById("go"),out=document.getElementById("out");
+drop.onclick=()=>fi.click();
+fi.onchange=e=>e.target.files[0]&&load(e.target.files[0]);
+drop.ondragover=e=>{e.preventDefault();drop.classList.add("on")};
+drop.ondragleave=()=>drop.classList.remove("on");
+drop.ondrop=e=>{e.preventDefault();drop.classList.remove("on");e.dataTransfer.files[0]&&load(e.dataTransfer.files[0])};
+
+function load(file){
+  const rd=new FileReader();
+  rd.onload=()=>{
+    const all=parseCSV(rd.result);
+    head=all[0].map(h=>h.trim());
+    rows=all.slice(1).filter(r=>r.some(c=>c!==""));
+    const li=head.findIndex(h=>norm(h)==="leads"||norm(h)==="lead");
+    if(li<0){info.innerHTML='<span class="warn">❌ “Leads” column not found. Columns: '+head.join(", ")+'</span>';go.disabled=true;return}
+    loaded={li,name:file.name};
+    // drop existing msg columns if present
+    info.innerHTML='<span class="ok">✅ '+file.name+'</span> — '+rows.length.toLocaleString()+' rows, Leads column found.';
+    out.value=out.value||file.name.replace(/\.csv$/i,"")+"_with_msg";
+    go.disabled=false;
+  };
+  rd.readAsText(file,"utf-8");
+}
+
+go.onclick=()=>{
+  if(!loaded)return;
+  let name=out.value.trim().replace(/[\\\/:*?"<>|]/g,"_");
+  if(!name){out.focus();out.style.borderColor="#f55";return}
+  if(!/\.csv$/i.test(name))name+=".csv";
+  const {li}=loaded, base=head.filter(h=>!/^msg[1-4]$/i.test(h));
+  const keep=head.map((h,i)=>/^msg[1-4]$/i.test(h)?-1:i).filter(i=>i>=0);
+  const lines=[base.concat(["msg1","msg2","msg3","msg4"]).map(esc).join(",")];
+  const cnt={},miss={};const prev=[];
+  for(const r of rows){
+    const lead=(r[li]||"").trim(),k=LK[norm(lead)];
+    let m=["","","",""];
+    if(k){m=MSG[k];cnt[k]=(cnt[k]||0)+1}else miss[lead||"(empty)"]=(miss[lead||"(empty)"]||0)+1;
+    const line=keep.map(i=>r[i]??"").concat(m);
+    lines.push(line.map(esc).join(","));
+    if(prev.length<5)prev.push([r[head.indexOf("Phone")]||"",lead,m[1]]);
+  }
+  const blob=new Blob(["\uFEFF"+lines.join("\r\n")+"\r\n"],{type:"text/csv;charset=utf-8"});
+  const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=name;
+  document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),2000);
+  let s='<b>Done → '+name+'</b><br>'+Object.entries(cnt).map(([k,v])=>'<span class="pill">'+k+': '+v+'</span>').join("");
+  const ms=Object.entries(miss);
+  if(ms.length)s+='<br><span class="warn">⚠ No message for: '+ms.map(([k,v])=>k+' ('+v+')').join(", ")+' — left blank.</span>';
+  document.getElementById("stats").innerHTML=s;
+  document.getElementById("prev").innerHTML='<table><tr><th>Phone</th><th>Leads</th><th>msg2 (preview)</th></tr>'+prev.map(p=>'<tr>'+p.map(x=>'<td>'+x.replace(/</g,"&lt;")+'</td>').join("")+'</tr>').join("")+'</table>';
+  document.getElementById("statsCard").style.display="block";
+};
+
+/* ---------- 60fps Indian rangoli / mandala canvas ---------- */
+const cv=document.getElementById("c"),g=cv.getContext("2d");
+let W,H,D;
+function fit(){D=Math.min(devicePixelRatio||1,2);W=innerWidth;H=innerHeight;cv.width=W*D;cv.height=H*D;g.setTransform(D,0,0,D,0,0)}
+addEventListener("resize",fit);fit();
+const COL=["#FF9933","#ffd24d","#e8326b","#138808","#ff6a1a","#fff1cf"];
+const TAU=Math.PI*2;
+function mandala(cx,cy,R,t,dir){
+  g.save();g.translate(cx,cy);g.rotate(t*0.12*dir);
+  for(let ring=0;ring<4;ring++){
+    const n=8+ring*4,r=R*(0.35+ring*0.2),pr=R*(0.16-ring*0.02);
+    for(let i=0;i<n;i++){
+      const a=i/n*TAU+Math.sin(t*0.6+ring)*0.05;
+      g.save();g.rotate(a);g.translate(r,0);
+      g.fillStyle=COL[(i+ring)%COL.length];g.globalAlpha=0.55;
+      g.beginPath();g.ellipse(0,0,pr,pr*0.45,0,0,TAU);g.fill();
+      g.globalAlpha=0.9;g.fillStyle=COL[(i+ring+2)%COL.length];
+      g.beginPath();g.arc(pr*0.9,0,pr*0.14,0,TAU);g.fill();
+      g.restore();}
+  }
+  g.globalAlpha=1;g.fillStyle="#ffd24d";g.beginPath();g.arc(0,0,R*0.12*(1+0.08*Math.sin(t*2)),0,TAU);g.fill();
+  g.strokeStyle="#ffb347";g.lineWidth=1.5;g.globalAlpha=.6;
+  for(let k=1;k<=4;k++){g.beginPath();g.arc(0,0,R*(0.25+k*0.2),0,TAU);g.stroke()}
+  g.restore();}
+const petals=Array.from({length:40},()=>({x:Math.random(),y:Math.random(),s:4+Math.random()*7,v:.03+Math.random()*.06,p:Math.random()*TAU,c:COL[Math.floor(Math.random()*3)]}));
+let last=performance.now();
+function frame(now){
+  const t=now/1000;last=now;
+  g.globalAlpha=1;
+  const bg=g.createLinearGradient(0,0,0,H);bg.addColorStop(0,"#3a0c0c");bg.addColorStop(1,"#1a0505");
+  g.fillStyle=bg;g.fillRect(0,0,W,H);
+  const R=Math.max(W,H)*0.32;
+  mandala(W*0.12,H*0.18,R*0.8,t,1);
+  mandala(W*0.9,H*0.85,R,t,-1);
+  mandala(W*0.88,H*0.1,R*0.5,t,1);
+  for(const p of petals){
+    const y=((p.y+t*p.v)%1.1)*H-20,x=p.x*W+Math.sin(t+p.p)*30;
+    g.save();g.translate(x,y);g.rotate(t+p.p);g.fillStyle=p.c;g.globalAlpha=.7;
+    g.beginPath();g.ellipse(0,0,p.s,p.s*.5,0,0,TAU);g.fill();g.restore();}
+  g.globalAlpha=1;
+  requestAnimationFrame(frame);}
+requestAnimationFrame(frame);
+</script></body></html>
